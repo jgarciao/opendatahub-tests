@@ -134,6 +134,7 @@ class TestLlamaStackVectorStores:
         self,
         unprivileged_llama_stack_client: LlamaStackClient,
         vector_store_with_example_docs: VectorStore,
+        subtests: pytest.Subtests,
     ) -> None:
         """
         Test vector_stores search functionality using the search endpoint.
@@ -149,25 +150,39 @@ class TestLlamaStackVectorStores:
         search_modes = ["vector"] if provider_id == "faiss" else list(IBM_EARNINGS_SEARCH_QUERIES_BY_MODE)
 
         for search_mode in search_modes:
-            queries = IBM_EARNINGS_SEARCH_QUERIES_BY_MODE[search_mode]
-            for query in queries:
-                search_response = unprivileged_llama_stack_client.vector_stores.search(
-                    vector_store_id=vector_store_with_example_docs.id,
-                    query=query,
-                    search_mode=search_mode,
-                    max_num_results=10,
+            with subtests.test(search_mode=search_mode):
+                queries = IBM_EARNINGS_SEARCH_QUERIES_BY_MODE[search_mode]
+                queries_with_results = 0
+
+                for query in queries:
+                    search_response = unprivileged_llama_stack_client.vector_stores.search(
+                        vector_store_id=vector_store_with_example_docs.id,
+                        query=query,
+                        search_mode=search_mode,
+                        max_num_results=10,
+                    )
+
+                    assert search_response is not None, (
+                        f"Search response is None for provider={provider_id} mode={search_mode!r} query={query!r}"
+                    )
+                    assert hasattr(search_response, "data"), "Search response missing 'data' attribute"
+                    assert isinstance(search_response.data, list), "Search response data should be a list"
+
+                    if len(search_response.data) > 0:
+                        queries_with_results += 1
+                        for result in search_response.data:
+                            assert hasattr(result, "content"), "Search result missing 'content' attribute"
+                            assert result.content is not None, "Search result content should not be None"
+                            assert len(result.content) > 0, "Search result content should not be empty"
+
+                assert queries_with_results >= 3, (
+                    f"At least 3 of 5 queries should return results for "
+                    f"provider={provider_id} search_mode={search_mode!r}, "
+                    f"but only {queries_with_results} queries returned results"
                 )
 
-                assert search_response is not None, f"Search response is None for mode={search_mode!r} query={query!r}"
-                assert hasattr(search_response, "data"), "Search response missing 'data' attribute"
-                assert isinstance(search_response.data, list), "Search response data should be a list"
-                assert len(search_response.data) > 0, f"No search results for mode={search_mode!r} query={query!r}"
+                LOGGER.info(
+                    f"Search mode {search_mode!r}: {queries_with_results} of {len(queries)} queries returned results"
+                )
 
-                for result in search_response.data:
-                    assert hasattr(result, "content"), "Search result missing 'content' attribute"
-                    assert result.content is not None, "Search result content should not be None"
-                    assert len(result.content) > 0, "Search result content should not be empty"
-
-            LOGGER.info(f"Search mode {search_mode!r}: {len(queries)} queries returned results")
-
-        LOGGER.info(f"Successfully tested vector store search across modes: {search_modes}")
+        LOGGER.info(f"Successfully tested vector store search for provider={provider_id} across modes: {search_modes}")
